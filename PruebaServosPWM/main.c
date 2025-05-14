@@ -8,13 +8,13 @@ void configura_timers (void);
 void DCO_setup(void);
 void UART_setup(void);
 void UART_send(unsigned char *str);
-void set_servo(unsigned char servo, unsigned char angulo);
+void set_servo(unsigned char servo, unsigned int angulo);
 int convert_ASCII(unsigned char *str);
 void show_position(unsigned char posicion);
 void num_to_str(unsigned int num, unsigned char *numstr);
 
 unsigned int duty_cycle[4] = {500, 500, 500, 500};
-unsigned char secuencia[4][10] = {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+unsigned int secuencia[4][10] = {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
                                   {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
                                   {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
                                   {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
@@ -24,8 +24,8 @@ unsigned char flag = 0;
 unsigned char input[INPUT_SIZE];
 unsigned char index = 0;
 unsigned char servo;
-unsigned char angulo;
-unsigned char posicion = 1;
+unsigned int angulo;
+unsigned int posicion = 1;
 unsigned int i=0;
 unsigned int j=0;
 unsigned char numstr[5];
@@ -59,7 +59,20 @@ void main (void) {
             if(input[0] == '0'){
                 flag &= ~BIT0;
             }else if(input[0] == '1'||input[0] == '2'||input[0] == '3'||input[0] == '4'){
-                servo = input[0];
+                switch(input[0]){
+                case '1':
+                    servo = 1;
+                    break;
+                case '2':
+                    servo = 2;
+                    break;
+                case '3':
+                    servo = 3;
+                    break;
+                case '4':
+                    servo = 4;
+                    break;
+                }
                 UART_send("Seleccionar angulo (0-180): \r\n\0");
                 flag |= BIT2;
                 while(flag & BIT2);
@@ -90,8 +103,8 @@ void main (void) {
                     for(i = 0; i < 10; i++){
                         flag |= BIT3;
                         while(flag & BIT3);
-                        for(j = 0; j < 4; j++){
-                            set_servo(j, secuencia[j][i]);
+                        for(j = 1; j < 5; j++){
+                            set_servo(j, secuencia[j-1][i]);
                         }
                     }
                     flag &= ~BIT4;
@@ -160,6 +173,7 @@ void main (void) {
                 UART_send("Seleccionar servo (1,2,3,4)\r\n0 para borrar, 5 para guardar y salir: \r\n\0");
                 flag |= BIT2;
                 while(flag & BIT2);
+                flag &= ~BIT5;
                 switch(input[0]){
                 case '1':
                     servo = 1;
@@ -194,7 +208,7 @@ void main (void) {
                     UART_send("Seleccionar angulo (0-180): \r\n\0");
                     flag |= BIT2;
                     while(flag & BIT2);
-                    secuencia[servo][posicion-1] = convert_ASCII(input);
+                    secuencia[servo-1][posicion-1] = convert_ASCII(input);
                 }
             }
         }
@@ -202,38 +216,29 @@ void main (void) {
 }
 
 void configura_puertos (void) {
-    // P1.2 y P1.3
-    P1DIR |= 0x0C;
-    P1SEL |= 0x0C;
-    // P4.1 y 4.2
-    P4DIR |= 0x06;
-    P4SEL |= 0x06;
+    // P1.2, P1.3, P1.4 y P1.5
+    P1DIR |= BIT2|BIT3|BIT4|BIT5;
+    P1SEL |= BIT2|BIT3|BIT4|BIT5;
 }
 
 void configura_timers (void) {
     //Timer A0
-    TA0CCR0 = 20000 - 1;         // Frecuencia del PWM
+    TA0CCR0 = 40000 - 1;         // Frecuencia del PWM
                                 // ~1,000,000 / 20000 = 50Hz
     //P1.2
     TA0CCTL1 = OUTMOD_7;        // Configuración SET/RESET (user's guide p.470)
-    TA0CCR1 = 500;              // Duty cycle de 0.5ms - Posicion 0º
+    TA0CCR1 = 1000;              // Duty cycle de 0.5ms - Posicion 0º
     //P1.3
     TA0CCTL2 = OUTMOD_7;
-    TA0CCR2 = 500;
+    TA0CCR2 = 1000;
+    //P1.4
+    TA0CCTL3 = OUTMOD_7;
+    TA0CCR3 = 1000;
+    //P1.5
+    TA0CCTL4 = OUTMOD_7;
+    TA0CCR4 = 1000;
 
-    TA0CTL = TASSEL_2 | MC_1 | TACLR;   // SMCK | modo UP | limpia TAR
-
-    //Timer B0
-    TB0CCR0 = 20000 - 1;
-
-    //P4.1
-    TB0CCTL1 = OUTMOD_7;
-    TB0CCR1 = 500;
-    //P4.2
-    TB0CCTL2 = OUTMOD_7;
-    TB0CCR2 = 500;
-
-    TB0CTL = TBSSEL_2 | MC_1 | TBCLR;
+    TA0CTL = TASSEL_2 | ID_3 | MC_1 | TACLR;   // SMCK | modo UP | limpia TAR
 }
 
 void DCO_setup(void){
@@ -280,16 +285,29 @@ void UART_send(unsigned char *str){
     }
 }
 
-void set_servo(unsigned char servo, unsigned char angulo){
+void set_servo(unsigned char servo, unsigned int angulo){
     if(angulo<=180){
-        duty_cycle[servo-1] = angulo*11+500; //2000/180º=11, 500 = 0º
+        unsigned int conv = (angulo*22)+1000; //2000/180º=11, 500 = 0º
+        duty_cycle[servo-1] = conv;
+        switch(servo){
+        case 1:
+            TA0CCR1 = duty_cycle[0];
+            break;
+        case 2:
+            TA0CCR2 = duty_cycle[1];
+            break;
+        case 3:
+            TA0CCR3 = duty_cycle[2];
+            break;
+        case 4:
+            TA0CCR4 = duty_cycle[3];
+            break;
+        default:
+            UART_send("Aiuda xd. \r\n\0");
+        }
     }else{
         UART_send("Error. Angulo fuera del rango. \r\n\0");
     }
-    TA0CCR1 = duty_cycle[0];
-    TA0CCR2 = duty_cycle[1];
-    TB0CCR1 = duty_cycle[2];
-    TB0CCR2 = duty_cycle[3];
 }
 
 int convert_ASCII(unsigned char *str){
@@ -342,6 +360,14 @@ int convert_ASCII(unsigned char *str){
 void show_position(unsigned char posicion){
     UART_send("Posiciones: ");
     //for(i = 0; i<4; i++){
+        num_to_str(secuencia[0][posicion-1]/100, numstr);
+        UART_send(numstr);
+        num_to_str((secuencia[0][posicion-1]%100)/10, numstr);
+        UART_send(numstr);
+        num_to_str(secuencia[0][posicion-1]%10, numstr);
+        UART_send(numstr);
+        UART_send(" ");
+
         num_to_str(secuencia[1][posicion-1]/100, numstr);
         UART_send(numstr);
         num_to_str((secuencia[1][posicion-1]%100)/10, numstr);
@@ -363,14 +389,6 @@ void show_position(unsigned char posicion){
         num_to_str((secuencia[3][posicion-1]%100)/10, numstr);
         UART_send(numstr);
         num_to_str(secuencia[3][posicion-1]%10, numstr);
-        UART_send(numstr);
-        UART_send(" ");
-
-        num_to_str(secuencia[4][posicion-1]/100, numstr);
-        UART_send(numstr);
-        num_to_str((secuencia[4][posicion-1]%100)/10, numstr);
-        UART_send(numstr);
-        num_to_str(secuencia[4][posicion-1]%10, numstr);
         UART_send(numstr);
         UART_send("\r\n\0");
     //}
